@@ -31,6 +31,21 @@ func (gn GtNode) Execute(ctx context.Context, state State) string {
 	return Continue
 }
 
+func TestGraphCircularDeps(t *testing.T) {
+	gb := NewGraphBuilder[State]()
+	_, err := gb.
+		AddNode("a", AdderNode(1)).
+		AddNode("b", AdderNode(2)).
+		AddEdge("a", "b").
+		AddEdge("b", "a").
+		SetStartNode("a").
+		Build()
+
+	if err == nil {
+		t.Error("expected error for graph with no reachable terminal node, got nil")
+	}
+}
+
 func TestGraph(t *testing.T) {
 	state := State{sum: 6}
 

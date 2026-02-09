@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 )
 
 // Graph stores the graph nodes and edge configuration.
@@ -108,7 +109,35 @@ func (gb *GraphBuilder[T]) Build() (Graph[T], error) {
 		return Graph[T]{}, errors.New("no invocation node found")
 	}
 
-	// TODO: Test for circular deps while building the graph
+	// Check that at least one terminal node (no outgoing edge) is reachable
+	// from the start. If not, the graph will loop forever.
+	if !hasReachableTerminal(gb.g.start, gb.g.edges) {
+		return Graph[T]{}, errors.New("graph has no reachable terminal node from start: execution would loop forever")
+	}
 
 	return gb.g, nil
+}
+
+// hasReachableTerminal performs a DFS from start and returns true if at least
+// one node with no outgoing edge is reachable.
+func hasReachableTerminal[T any](start string, edges map[string]EdgeResolver[T]) bool {
+	visited := map[string]bool{}
+
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		if visited[node] {
+			return false
+		}
+		visited[node] = true
+
+		resolver, hasEdge := edges[node]
+		if !hasEdge {
+			// Terminal node found.
+			return true
+		}
+
+		return slices.ContainsFunc(resolver.edges(), dfs)
+	}
+
+	return dfs(start)
 }
