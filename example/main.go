@@ -6,41 +6,52 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aki-kong/flodk"
+	"github.com/aki-kong/flodk/llm"
+	"github.com/aki-kong/flodk/llm/ollama"
 )
 
 type FlightBookingState struct {
-	Name        string
-	Origin      string
-	Destination string
-	Flights     []string
+	RawPrompt   string   `json:"prompt"`
+	Name        string   `json:"name" flodk_extraction:"username"`
+	Origin      string   `json:"origin" flodk_extraction:"origin"`
+	Destination string   `json:"destination" flodk_extraction:"destination"`
+	Flights     []string `json:"flights"`
+}
+
+func (fbs FlightBookingState) Prompt() string {
+	return fbs.RawPrompt
 }
 
 type Greet string
 
 func (g Greet) Execute(ctx context.Context, state FlightBookingState) (FlightBookingState, error) {
-	requirements := flodk.Requirements{
-		"name": {
-			Type: flodk.Custom,
-		},
-	}
-	values, err := flodk.InterruptWithValidation(
-		ctx,
-		"Before we continue, may I know your name?",
-		"name_not_found",
-		requirements,
-		requirements.Validate,
-	)
-	if err != nil {
-		return state, err
-	}
+	name := state.Name
+	if name == "" {
+		requirements := flodk.Requirements{
+			"name": {
+				Type: flodk.Custom,
+			},
+		}
+		values, err := flodk.InterruptWithValidation(
+			ctx,
+			"Before we continue, may I know your name?",
+			"name_not_found",
+			requirements,
+			requirements.Validate,
+		)
+		if err != nil {
+			return state, err
+		}
 
-	name := values["name"]
+		name = values["name"]
+		state.Name = name
+	}
 
 	fmt.Printf("👋 %s, %s!!\n", g, name)
-	state.Name = name
 
 	return state, nil
 }
@@ -55,13 +66,18 @@ func enc() *json.Encoder {
 type Gather struct{}
 
 func (g Gather) Execute(ctx context.Context, state FlightBookingState) (FlightBookingState, error) {
-	requirements := flodk.Requirements{
-		"origin": {
+	requirements := flodk.Requirements{}
+
+	if state.Origin == "" {
+		requirements["origin"] = flodk.Requirement{
 			Type: flodk.Custom,
-		},
-		"destination": {
+		}
+	}
+
+	if state.Destination == "" {
+		requirements["destination"] = flodk.Requirement{
 			Type: flodk.Custom,
-		},
+		}
 	}
 
 	values, err := flodk.InterruptWithValidation(ctx,
@@ -77,10 +93,19 @@ func (g Gather) Execute(ctx context.Context, state FlightBookingState) (FlightBo
 	origin := values["origin"]
 	dest := values["destination"]
 
-	state.Origin = origin
-	state.Destination = dest
+	if state.Origin == "" {
+		state.Origin = origin
+	}
 
-	fmt.Printf("✈️ Finding flights from %s to %s!!\n", origin, dest)
+	if state.Destination == "" {
+		state.Destination = dest
+	}
+
+	return state, nil
+}
+
+func findFlights(ctx context.Context, state FlightBookingState) (FlightBookingState, error) {
+	fmt.Printf("✈️ Finding flights from %s to %s!!\n", state.Origin, state.Destination)
 	for range 100 {
 		fmt.Print(".")
 		time.Sleep(16 * time.Millisecond)
@@ -95,15 +120,53 @@ func (g Gather) Execute(ctx context.Context, state FlightBookingState) (FlightBo
 func main() {
 	var err error
 
+	prompt := strings.Join(os.Args[1:], " ")
+	if prompt == "" {
+		return
+	}
+
+	fmt.Printf("\033[1mPrompt\033[0m: %s\n", prompt)
+
+	llmClient := ollama.NewOllamaClient("http://localhost:11434")
+	nameExtractionNode := llm.NewDataExtraction[FlightBookingState](
+		llmClient,
+		os.Getenv("OLLAMA_MODEL"),
+	).
+		Extract("username", llm.DTString)
+
+	routeExtractionNode := llm.NewDataExtraction[FlightBookingState](
+		llmClient,
+		os.Getenv("OLLAMA_MODEL"),
+	).
+		Extract("origin", llm.DTString).
+		Extract("destination", llm.DTString)
+
 	ctx := context.Background()
 	gb := flodk.NewGraphBuilder[FlightBookingState]()
 	graph, err := gb.
+		AddNode("ai_greet", nameExtractionNode).
 		AddNode("greet", Greet("Hola")).
-		AddNode("get_details", Gather{}).
+		AddNode("ai_gather", routeExtractionNode).
+		AddNode("manual_gather", Gather{}).
+		AddNode("find_flights", flodk.FunctionNode[FlightBookingState](findFlights)).
 		AddNode("end", flodk.Noop[FlightBookingState]()).
-		AddEdge("greet", "get_details").
-		AddEdge("get_details", "end").
-		SetStartNode("greet").Build()
+		AddEdge("ai_greet", "greet").
+		AddEdge("greet", "ai_gather").
+		AddConditionalEdge(
+			"ai_gather",
+			flodk.ConditionalFunction[FlightBookingState](func(ctx context.Context, state FlightBookingState) string {
+				if state.Origin == "" || state.Destination == "" {
+					return "manual_gather"
+				}
+
+				return "skip_manual_gather"
+			}), map[string]string{
+				"manual_gather":      "manual_gather",
+				"skip_manual_gather": "find_flights",
+			}).
+		AddEdge("manual_gather", "find_flights").
+		AddEdge("find_flights", "end").
+		SetStartNode("ai_greet").Build()
 	if err != nil {
 		panic(err)
 	}
@@ -112,7 +175,7 @@ func main() {
 
 	pipe := flodk.NewPipe("book_flights", graph, store)
 
-	state := FlightBookingState{}
+	state := FlightBookingState{RawPrompt: prompt}
 	state, err = pipe.Invoke(ctx, "thread-123", state)
 	if err == nil {
 		fmt.Printf("State: %+v\n", state)

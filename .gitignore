@@ -1,0 +1,28 @@
+# Go
+bin/
+dist/
+vendor/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*.swo
+*~
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+*.lnk
+desktop.ini
+
+# Environment variables
+.env
