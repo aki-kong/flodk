@@ -110,6 +110,21 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 			return runState, err
 		}
 
+		if f.execState.Interrupt.InterruptID.NodeID == currentID {
+			// If the current node successfully processed the interrupt,
+			// then the interrupt will be pushed into resolved HITL slice
+			// of the execState. The current interrupt will be reset.
+			lint, ok := getLoadedInterrupt(ctx, f.execState.Interrupt)
+			if ok {
+				f.execState.InterruptHistory = append(
+					f.execState.InterruptHistory,
+					lint,
+				)
+			}
+
+			f.execState.Interrupt = HITLInterrupt{}
+		}
+
 		runState = currentState
 		f.onNodeExecution.Call(f.execState, runState)
 

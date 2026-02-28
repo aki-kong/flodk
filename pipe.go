@@ -139,6 +139,12 @@ func LoadInterrupt(ctx context.Context, interrupt HITLInterrupt, values map[stri
 	})
 }
 
+// getLoadedInterrupt is a private function used to just get the loaded resolved interrupt from the context.
+func getLoadedInterrupt(ctx context.Context, interrupt HITLInterrupt) (ResolvedHITLInterrupt, bool) {
+	rint, ok := ctx.Value("interrupt_of:" + interrupt.InterruptID.NodeID).(ResolvedHITLInterrupt)
+	return rint, ok
+}
+
 // Interrupt is a helper function which calls [InterruptWithValidation] with a no validation.
 func Interrupt(
 	ctx context.Context,
