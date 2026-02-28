@@ -32,6 +32,14 @@ The framework uses a checkpoint-based approach to maintain execution state:
 - **ExecutionState**: Combines checkpoint state with application-specific state
 - **ExecutionID**: Uniquely identifies an execution (ID + flow name)
 
+### Callback ordering
+
+- Callbacks run synchronously inside `Flow.Execute`. Any error returned by a callback is returned by `Execute`.
+- When a node returns a `HITLInterrupt`, `OnInterrupt` is invoked before `Execute` returns. Use `OnInterrupt` to persist interrupt state.
+- When a node succeeds, the edge resolver computes the next node, `CheckpointState.CheckpointID` is updated, and then `OnNodeExec` is invoked. Use `OnNodeExec` to persist the checkpoint for the next step.
+- `OnNodeExec` is not invoked on the interrupt path. Persist both `OnInterrupt` and `OnNodeExec` to ensure safe resumption.
+- `OnGraphEnd` runs once after the graph finishes. Its error is propagated.
+
 ## Usage
 
 ### Basic Workflow

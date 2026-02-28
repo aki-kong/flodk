@@ -7,16 +7,16 @@ import (
 
 // FlowCallback is a helper type which will be called during flow execution
 // during different steps.
-type FlowCallback[T any] func(cs CheckpointState, runState T)
+type FlowCallback[T any] func(cs CheckpointState, runState T) error
 
 // Call is a helper method which checks if the flow function passed is not nil
 // and calls the same.
-func (fc FlowCallback[T]) Call(cs CheckpointState, runState T) {
+func (fc FlowCallback[T]) Call(cs CheckpointState, runState T) error {
 	if fc == nil {
-		return
+		return nil
 	}
 
-	fc(cs, runState)
+	return fc(cs, runState)
 }
 
 // Flow is a construct used start or resume execution of a graph with the
@@ -26,9 +26,9 @@ type Flow[T any] struct {
 	graph     Graph[T]
 	execState CheckpointState
 
-	onNodeExecution  FlowCallback[T]
-	onNodeResolution FlowCallback[T]
-	onGraphEnd       FlowCallback[T]
+	onNodeExecution FlowCallback[T]
+	onGraphEnd      FlowCallback[T]
+	onInterrupt     FlowCallback[T]
 }
 
 // NewFlow create a new flow construct for the passed graph and name.
@@ -57,16 +57,16 @@ func (f *Flow[T]) OnNodeExec(cb FlowCallback[T]) *Flow[T] {
 	return f
 }
 
-// OnNodeResolution sets the callback function to be called after the next node is resolved.
-func (f *Flow[T]) OnNodeResolution(cb FlowCallback[T]) *Flow[T] {
-	f.onNodeResolution = cb
+// OnGraphEnd sets the callback function to be called after the graph execution is completed.
+func (f *Flow[T]) OnGraphEnd(cb FlowCallback[T]) *Flow[T] {
+	f.onGraphEnd = cb
 
 	return f
 }
 
-// OnGraphEnd sets the callback function to be called after the graph execution is completed.
-func (f *Flow[T]) OnGraphEnd(cb FlowCallback[T]) *Flow[T] {
-	f.onGraphEnd = cb
+// OnInterrupt sets the callback function to be called when the flow is interrupted.
+func (f *Flow[T]) OnInterrupt(cb FlowCallback[T]) *Flow[T] {
+	f.onInterrupt = cb
 
 	return f
 }
@@ -84,11 +84,6 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 
 	runState := state
 
-	// callback the state on function exit
-	defer func() {
-		f.onGraphEnd.Call(f.execState, runState)
-	}()
-
 	continueRunning := true
 
 	for continueRunning {
@@ -104,7 +99,10 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 				f.execState.Interrupt = interrupt
 				continueRunning = false
 
-				f.onNodeExecution.Call(f.execState, runState)
+				// Callback failures.
+				if err := f.onInterrupt.Call(f.execState, runState); err != nil {
+					return runState, err
+				}
 			}
 
 			return runState, err
@@ -126,7 +124,6 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 		}
 
 		runState = currentState
-		f.onNodeExecution.Call(f.execState, runState)
 
 		// Resolve the next node.
 		resolver, ok := f.graph.edges[currentID]
@@ -137,7 +134,13 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 
 		currentID = resolver.Resolve(ctx, runState)
 		f.execState.CheckpointID = currentID
-		f.onNodeResolution.Call(f.execState, runState)
+		if err := f.onNodeExecution.Call(f.execState, runState); err != nil {
+			return runState, err
+		}
+	}
+
+	if err := f.onGraphEnd.Call(f.execState, runState); err != nil {
+		return runState, err
 	}
 
 	return runState, nil

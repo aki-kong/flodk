@@ -36,9 +36,8 @@ func NewPipe[T any](
 // persistStateFunc generates a generic callback function which Flow can call
 // during each part of the execution.
 func (p *Pipe[T]) persistStateFunc(ctx context.Context, id string) FlowCallback[T] {
-	return func(cs CheckpointState, runState T) {
-		// TODO: Handle error
-		p.store.Set(ctx, ExecutionID{
+	return func(cs CheckpointState, runState T) error {
+		return p.store.Set(ctx, ExecutionID{
 			ID:       id,
 			FlowName: p.name,
 		}, ExecutionState[T]{
@@ -61,7 +60,7 @@ func (p *Pipe[T]) invoke(
 	flow := NewFlow(p.name, p.graph).
 		WithCheckpoint(checkpointState).
 		OnNodeExec(storeFunc).
-		OnNodeResolution(storeFunc).
+		OnInterrupt(storeFunc).
 		OnGraphEnd(storeFunc)
 
 	return flow.Execute(ctx, initState)
