@@ -74,6 +74,7 @@ func (p *Pipe[T]) Invoke(
 	initState T,
 ) (T, error) {
 	return p.invoke(ctx, id, CheckpointState{
+		Status:           ExecutionStatusInProgress,
 		Visited:          make([]string, 0),
 		InterruptHistory: make([]ResolvedHITLInterrupt, 0),
 	}, initState)
