@@ -93,8 +93,6 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 	continueRunning := true
 
 	for continueRunning {
-		f.execState.Visited = append(f.execState.Visited, currentID)
-
 		// Execute the current node.
 		node := f.graph.nodeMap[currentID]
 		currentState, err := node.Execute(LoadNodeID(ctx, currentID), runState)
@@ -136,6 +134,8 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 		if err := f.onNodeExecution.Call(f.execState, runState); err != nil {
 			return runState, err
 		}
+
+		f.execState.Visited = append(f.execState.Visited, currentID)
 
 		// Resolve the next node.
 		resolver, ok := f.graph.edges[currentID]
