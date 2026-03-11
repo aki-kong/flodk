@@ -37,9 +37,11 @@ func NewFlow[T any](
 	graph Graph[T],
 ) *Flow[T] {
 	return &Flow[T]{
-		name:      name,
-		graph:     graph,
-		execState: CheckpointState{},
+		name:  name,
+		graph: graph,
+		execState: CheckpointState{
+			Status: ExecutionStatusInProgress,
+		},
 	}
 }
 
@@ -74,6 +76,10 @@ func (f *Flow[T]) OnInterrupt(cb FlowCallback[T]) *Flow[T] {
 // Execute executes the graph with provided initial state and resumes based on the passed
 // checkpoint state configuration.
 func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
+	if f.execState.Status == ExecutionStatusEnd {
+		return state, ErrFlowExecutionEnded
+	}
+
 	currentID := f.graph.start
 	if f.execState.CheckpointID != "" {
 		currentID = f.execState.CheckpointID
@@ -97,6 +103,7 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 			if errors.As(err, &interrupt) {
 				runState = currentState
 				f.execState.Interrupt = interrupt
+				f.execState.Status = ExecutionStatusInterrupted
 				continueRunning = false
 
 				// Callback failures.
@@ -108,7 +115,7 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 			return runState, err
 		}
 
-		if f.execState.Interrupt.InterruptID.NodeID == currentID {
+		if f.execState.Status == ExecutionStatusInterrupted && f.execState.Interrupt.InterruptID.NodeID == currentID {
 			// If the current node successfully processed the interrupt,
 			// then the interrupt will be pushed into resolved HITL slice
 			// of the execState. The current interrupt will be reset.
@@ -120,10 +127,15 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 				)
 			}
 
+			f.execState.Status = ExecutionStatusInProgress
 			f.execState.Interrupt = HITLInterrupt{}
 		}
 
 		runState = currentState
+
+		if err := f.onNodeExecution.Call(f.execState, runState); err != nil {
+			return runState, err
+		}
 
 		// Resolve the next node.
 		resolver, ok := f.graph.edges[currentID]
@@ -134,11 +146,9 @@ func (f *Flow[T]) Execute(ctx context.Context, state T) (T, error) {
 
 		currentID = resolver.Resolve(ctx, runState)
 		f.execState.CheckpointID = currentID
-		if err := f.onNodeExecution.Call(f.execState, runState); err != nil {
-			return runState, err
-		}
 	}
 
+	f.execState.Status = ExecutionStatusEnd
 	if err := f.onGraphEnd.Call(f.execState, runState); err != nil {
 		return runState, err
 	}

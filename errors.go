@@ -1,6 +1,7 @@
 package flodk
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -32,3 +33,5 @@ func RequirementInvalid(key string, value string, suggestions []string) ErrRequi
 func (iv ErrRequirementInvalidValue) Error() string {
 	return fmt.Sprintf("invalid value for %s: %s, need one of [%s]", iv.Key, iv.Value, iv.Suggestions)
 }
+
+var ErrFlowExecutionEnded = errors.New("flow execution ended")

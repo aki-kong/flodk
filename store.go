@@ -35,12 +35,22 @@ type CheckpointState struct {
 	Interrupt HITLInterrupt `json:"interrupt"`
 	// InterruptHistory stores all the resolved HITL interrupts.
 	InterruptHistory []ResolvedHITLInterrupt `json:"interrupt_history"`
+	// Execution Status of the graph.
+	Status ExecutionStatus `json:"status"`
 }
+
+type ExecutionStatus string
+
+const (
+	ExecutionStatusInProgress  ExecutionStatus = "in-progress"
+	ExecutionStatusInterrupted ExecutionStatus = "interrupted"
+	ExecutionStatusEnd         ExecutionStatus = "ended"
+)
 
 // ResolvedHITLInterrupt contains the original HITL interrupt and the answer values submitted by the user.
 type ResolvedHITLInterrupt struct {
 	HITLInterrupt
-	Values map[string]string
+	Values map[string]string `json:"values"`
 }
 
 // InMemoryStore implements the [Store] interface to store the checkpointing data in a in-memory map.
